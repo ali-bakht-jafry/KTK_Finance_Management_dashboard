@@ -1,0 +1,418 @@
+// Girls Hostel Management System — Prisma schema
+//
+// Money is stored as integer rupees (Int). PKR does not use fractional paisa in
+// practice for this domain, and integer arithmetic avoids all floating-point
+// error. This satisfies the "integer smallest currency units" requirement.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  ADMIN
+  ACCOUNTANT
+  MANAGER
+}
+
+enum ResidentStatus {
+  ACTIVE
+  LEFT
+}
+
+// Money flowing IN (revenue) or OUT (refund) of the operating ledger.
+// Security is deliberately NOT a PaymentType: security is a refundable
+// liability and lives in its own ledger (SecurityTransaction).
+enum PaymentType {
+  RENT
+  MESS
+  OTHER
+  REFUND
+}
+
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+  EASYPAISA
+  JAZZCASH
+  OTHER
+}
+
+enum ExpenseCategory {
+  ELECTRICITY
+  GAS
+  WATER
+  INTERNET
+  MAINTENANCE
+  CLEANING
+  STAFF_SALARY
+  MESS
+  FURNITURE
+  OTHER
+}
+
+enum SecurityTransactionType {
+  DEPOSIT
+  REFUND
+  DEDUCTION
+}
+
+enum StaffStatus {
+  ACTIVE
+  LEFT
+}
+
+enum StaffPaymentType {
+  SALARY
+  ADVANCE
+  DEDUCTION
+}
+
+// ---------------------------------------------------------------------------
+// Users & roles
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(MANAGER)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  payments             Payment[]
+  expenses             Expense[]
+  securityTransactions SecurityTransaction[]
+  staffPayments        StaffPayment[]
+  receipts             Receipt[]
+  auditLogs            AuditLog[]
+}
+
+// ---------------------------------------------------------------------------
+// Hostel structure: Floor -> Room -> Seat
+// ---------------------------------------------------------------------------
+
+model Floor {
+  id        String   @id @default(cuid())
+  name      String
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  rooms Room[]
+
+  @@index([order])
+}
+
+model Room {
+  id          String   @id @default(cuid())
+  floorId     String
+  floor       Floor    @relation(fields: [floorId], references: [id], onDelete: Cascade)
+  name        String
+  capacity    Int?
+  defaultRent Int?
+  notes       String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  seats Seat[]
+
+  // A room identifier must be unique within its floor.
+  @@unique([floorId, name])
+  @@index([floorId])
+}
+
+model Seat {
+  id     String @id @default(cuid())
+  roomId String
+  room   Room   @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  name   String
+  order  Int    @default(0)
+  active Boolean @default(true)
+
+  // Denormalized pointer to the single active resident occupying this seat.
+  // A nullable single column can hold at most ONE resident, and the @unique
+  // index guarantees a resident cannot be "current" on two seats at once.
+  // This gives hard database-level enforcement of the one-resident-per-seat rule.
+  currentResidentId String?   @unique
+  currentResident   Resident? @relation("CurrentSeat", fields: [currentResidentId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  assignments SeatAssignment[]
+
+  // A seat identifier must be unique within its room.
+  @@unique([roomId, name])
+  @@index([roomId])
+}
+
+// ---------------------------------------------------------------------------
+// Residents
+// ---------------------------------------------------------------------------
+
+model Resident {
+  id          String         @id @default(cuid())
+  name        String
+  phone       String?
+  joiningDate DateTime       @db.Date
+  leavingDate DateTime?      @db.Date
+  status      ResidentStatus @default(ACTIVE)
+  monthlyRent Int            @default(0) // current monthly rent rate used to generate future charges
+  monthlyMess Int            @default(0) // current monthly mess rate (0 = not using mess)
+  notes       String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  currentSeat          Seat?                 @relation("CurrentSeat")
+  assignments          SeatAssignment[]
+  rentCharges          RentCharge[]
+  messCharges          MessCharge[]
+  payments             Payment[]
+  securityTransactions SecurityTransaction[]
+  receipts             Receipt[]
+
+  @@index([status])
+  @@index([name])
+}
+
+// ---------------------------------------------------------------------------
+// Assignments (append-only history)
+// ---------------------------------------------------------------------------
+
+model SeatAssignment {
+  id         String   @id @default(cuid())
+  residentId String
+  resident   Resident @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  seatId     String?
+  seat       Seat?    @relation(fields: [seatId], references: [id], onDelete: SetNull)
+
+  // Snapshot of the location at assignment start, so assignment history stays
+  // intact even after the seat/room/floor is later renamed or deleted.
+  floorName String
+  roomName  String
+  seatName  String
+
+  startDate DateTime  @db.Date
+  endDate   DateTime? @db.Date
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([residentId])
+  @@index([seatId])
+}
+
+// ---------------------------------------------------------------------------
+// Monthly charges (rent & mess) — historical charges are immutable once paid
+// ---------------------------------------------------------------------------
+
+model RentCharge {
+  id         String   @id @default(cuid())
+  residentId String
+  resident   Resident @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  period     String // "YYYY-MM"
+  amount     Int
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  payments Payment[]
+
+  @@unique([residentId, period])
+  @@index([period])
+}
+
+model MessCharge {
+  id         String   @id @default(cuid())
+  residentId String
+  resident   Resident @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  period     String // "YYYY-MM"
+  amount     Int
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  payments Payment[]
+
+  @@unique([residentId, period])
+  @@index([period])
+}
+
+// ---------------------------------------------------------------------------
+// Operating payment ledger (money received / refunded — never security)
+// ---------------------------------------------------------------------------
+
+model Payment {
+  id           String      @id @default(cuid())
+  residentId   String?
+  resident     Resident?   @relation(fields: [residentId], references: [id], onDelete: SetNull)
+  rentChargeId String?
+  rentCharge   RentCharge? @relation(fields: [rentChargeId], references: [id], onDelete: SetNull)
+  messChargeId String?
+  messCharge   MessCharge? @relation(fields: [messChargeId], references: [id], onDelete: SetNull)
+
+  paymentType PaymentType
+  amount      Int // always positive; PaymentType.REFUND denotes an outflow
+  method      PaymentMethod @default(CASH)
+  date        DateTime      @db.Date
+  reference   String?
+  notes       String?
+  receiptImageData String?
+
+  createdById String
+  createdBy   User   @relation(fields: [createdById], references: [id])
+
+  receipt Receipt?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([residentId])
+  @@index([rentChargeId])
+  @@index([messChargeId])
+  @@index([paymentType])
+  @@index([date])
+}
+
+// ---------------------------------------------------------------------------
+// Security deposit ledger (separate from revenue)
+// ---------------------------------------------------------------------------
+
+model SecurityTransaction {
+  id          String                  @id @default(cuid())
+  residentId  String
+  resident    Resident                @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  type        SecurityTransactionType
+  amount      Int // always positive; meaning derived from type
+  date        DateTime                @db.Date
+  notes       String?
+  createdById String
+  createdBy   User                    @relation(fields: [createdById], references: [id])
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+
+  @@index([residentId])
+  @@index([type])
+  @@index([date])
+}
+
+// ---------------------------------------------------------------------------
+// Expenses
+// ---------------------------------------------------------------------------
+
+model Expense {
+  id          String          @id @default(cuid())
+  date        DateTime        @db.Date
+  category    ExpenseCategory
+  amount      Int
+  description String?
+  method      PaymentMethod   @default(CASH)
+  notes       String?
+  createdById String
+  createdBy   User            @relation(fields: [createdById], references: [id])
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([date])
+  @@index([category])
+}
+
+// ---------------------------------------------------------------------------
+// Staff & salary
+// ---------------------------------------------------------------------------
+
+model Staff {
+  id            String      @id @default(cuid())
+  name          String
+  role          String      @default("Other")
+  phone         String?
+  joiningDate   DateTime    @db.Date
+  monthlySalary Int         @default(0)
+  status        StaffStatus @default(ACTIVE)
+  notes         String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  payments StaffPayment[]
+
+  @@index([status])
+}
+
+model StaffPayment {
+  id          String           @id @default(cuid())
+  staffId     String
+  staff       Staff            @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  type        StaffPaymentType
+  amount      Int
+  date        DateTime         @db.Date
+  period      String? // "YYYY-MM" when tied to a salary month
+  notes       String?
+  createdById String
+  createdBy   User             @relation(fields: [createdById], references: [id])
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([staffId])
+  @@index([type])
+}
+
+// ---------------------------------------------------------------------------
+// Receipts
+// ---------------------------------------------------------------------------
+
+model Receipt {
+  id            String        @id @default(cuid())
+  receiptNumber String        @unique
+  paymentId     String?       @unique
+  payment       Payment?      @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  residentId    String?
+  resident      Resident?     @relation(fields: [residentId], references: [id], onDelete: SetNull)
+  amount        Int
+  paymentType   PaymentType
+  method        PaymentMethod
+  date          DateTime      @db.Date
+  createdById   String
+  createdBy     User          @relation(fields: [createdById], references: [id])
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([receiptNumber])
+  @@index([residentId])
+}
+
+// ---------------------------------------------------------------------------
+// Audit log & settings
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  entity    String
+  entityId  String?
+  before    Json?
+  after     Json?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([entity])
+  @@index([userId])
+}
+
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
