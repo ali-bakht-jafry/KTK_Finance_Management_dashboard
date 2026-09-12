@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title>KTK Girls Hostel</title>
+  <rect width="64" height="64" rx="14" fill="#0f766e"/>
+  <path d="M14 29 32 15l18 14v21H14V29Z" fill="#f8fafc"/>
+  <path d="M21 34h7v7h-7v-7Zm15 0h7v7h-7v-7ZM21 45h22v5H21v-5Z" fill="#0f766e"/>
+  <path d="M29 24h6v6h-6v-6Z" fill="#f59e0b"/>
+  <path d="M32 17v7" stroke="#f59e0b" stroke-width="3" stroke-linecap="round"/>
+</svg>
