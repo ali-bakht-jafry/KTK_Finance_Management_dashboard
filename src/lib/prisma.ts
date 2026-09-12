@@ -7,8 +7,12 @@ if (!databaseUrl) {
 }
 
 const runtimeDatabaseUrl = new URL(databaseUrl);
-if (!runtimeDatabaseUrl.searchParams.has("connection_limit")) {
-  runtimeDatabaseUrl.searchParams.set("connection_limit", "1");
+const configuredConnectionLimit = Number(runtimeDatabaseUrl.searchParams.get("connection_limit"));
+if (!Number.isFinite(configuredConnectionLimit) || configuredConnectionLimit < 5) {
+  runtimeDatabaseUrl.searchParams.set("connection_limit", "5");
+}
+if (!runtimeDatabaseUrl.searchParams.has("pool_timeout")) {
+  runtimeDatabaseUrl.searchParams.set("pool_timeout", "20");
 }
 
 const globalForPrisma = globalThis as unknown as {
