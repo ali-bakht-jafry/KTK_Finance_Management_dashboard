@@ -27,6 +27,10 @@ export async function getOccupancyStats() {
   };
 }
 
+export async function getActiveResidentCount(): Promise<number> {
+  return prisma.resident.count({ where: { status: "ACTIVE" } });
+}
+
 export async function getFloorOccupancy() {
   const floors = await prisma.floor.findMany({
     orderBy: [{ order: "asc" }, { name: "asc" }],
@@ -73,40 +77,31 @@ export type FinancialSummary = {
 };
 
 export async function getFinancialSummary(): Promise<FinancialSummary> {
-  const [
-    rentCharges,
-    rentPayments,
-    messCharges,
-    messPayments,
-    otherIncome,
-    refunds,
-    expenses,
-    secDeposit,
-    secRefund,
-    secDeduction,
-  ] = await Promise.all([
+  const [rentCharges, messCharges, paymentsByType, expenses, securityByType] = await Promise.all([
     prisma.rentCharge.aggregate({ _sum: { amount: true } }),
-    prisma.payment.aggregate({ where: { paymentType: "RENT" }, _sum: { amount: true } }),
     prisma.messCharge.aggregate({ _sum: { amount: true } }),
-    prisma.payment.aggregate({ where: { paymentType: "MESS" }, _sum: { amount: true } }),
-    prisma.payment.aggregate({ where: { paymentType: "OTHER" }, _sum: { amount: true } }),
-    prisma.payment.aggregate({ where: { paymentType: "REFUND" }, _sum: { amount: true } }),
+    prisma.payment.groupBy({ by: ["paymentType"], _sum: { amount: true } }),
     prisma.expense.aggregate({ _sum: { amount: true } }),
-    prisma.securityTransaction.aggregate({ where: { type: "DEPOSIT" }, _sum: { amount: true } }),
-    prisma.securityTransaction.aggregate({ where: { type: "REFUND" }, _sum: { amount: true } }),
-    prisma.securityTransaction.aggregate({ where: { type: "DEDUCTION" }, _sum: { amount: true } }),
+    prisma.securityTransaction.groupBy({ by: ["type"], _sum: { amount: true } }),
   ]);
 
+  const paymentTotals = Object.fromEntries(
+    paymentsByType.map((row) => [row.paymentType, row._sum.amount ?? 0]),
+  );
+  const securityTotals = Object.fromEntries(
+    securityByType.map((row) => [row.type, row._sum.amount ?? 0]),
+  );
+
   const rentExpected = rentCharges._sum.amount ?? 0;
-  const rentReceived = rentPayments._sum.amount ?? 0;
+  const rentReceived = paymentTotals.RENT ?? 0;
   const messExpected = messCharges._sum.amount ?? 0;
-  const messReceived = messPayments._sum.amount ?? 0;
-  const other = otherIncome._sum.amount ?? 0;
-  const refundTotal = refunds._sum.amount ?? 0;
+  const messReceived = paymentTotals.MESS ?? 0;
+  const other = paymentTotals.OTHER ?? 0;
+  const refundTotal = paymentTotals.REFUND ?? 0;
   const totalExpenses = expenses._sum.amount ?? 0;
-  const securityReceived = secDeposit._sum.amount ?? 0;
-  const securityRefunded = secRefund._sum.amount ?? 0;
-  const securityDeducted = secDeduction._sum.amount ?? 0;
+  const securityReceived = securityTotals.DEPOSIT ?? 0;
+  const securityRefunded = securityTotals.REFUND ?? 0;
+  const securityDeducted = securityTotals.DEDUCTION ?? 0;
 
   return {
     rentExpected,

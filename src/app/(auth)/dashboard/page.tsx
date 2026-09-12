@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { can, PERMISSIONS } from "@/lib/permissions";
-import { getOccupancyStats, getFinancialSummary, getFloorOccupancy } from "@/lib/aggregates";
+import { getActiveResidentCount, getFinancialSummary, getFloorOccupancy } from "@/lib/aggregates";
 import { getSetting } from "@/lib/settings";
 import { formatPKR } from "@/lib/format";
 import { PageHeader } from "@/components/ui/page-header";
@@ -21,12 +21,20 @@ import { EmptyState } from "@/components/ui/empty-state";
 
 export default async function DashboardPage() {
   const user = await requireUser();
-  const [hostelName, occupancy, finance, floors] = await Promise.all([
+  const [hostelName, activeResidents, finance, floors] = await Promise.all([
     getSetting("hostel.name"),
-    getOccupancyStats(),
+    getActiveResidentCount(),
     getFinancialSummary(),
     getFloorOccupancy(),
   ]);
+
+  const occupancy = floors.reduce(
+    (summary, floor) => ({
+      totalRooms: summary.totalRooms + floor.rooms,
+      occupiedSeats: summary.occupiedSeats + floor.occupied,
+    }),
+    { totalRooms: 0, occupiedSeats: 0 },
+  );
 
   const quickActions = [
     { label: "Book a bed", href: "/rooms", icon: UserPlus, permission: PERMISSIONS.manageResidents },
@@ -42,7 +50,7 @@ export default async function DashboardPage() {
       />
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <StatCard label="Residents" value={occupancy.activeResidents} icon={Users} />
+        <StatCard label="Residents" value={activeResidents} icon={Users} />
         <StatCard label="Rooms" value={occupancy.totalRooms} icon={DoorOpen} />
         <StatCard label="Occupied Seats" value={occupancy.occupiedSeats} icon={Building2} />
         <StatCard label="Collection" value={formatPKR(finance.rentReceived + finance.messReceived)} icon={Wallet} tone="positive" />
