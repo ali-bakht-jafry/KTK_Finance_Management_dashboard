@@ -4,6 +4,7 @@ import { ArrowLeft, Plus } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { can, PERMISSIONS } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
+import { getBulkResidentFinancials } from "@/lib/aggregates";
 import { formatDisplayDate, toDateString } from "@/lib/dates";
 import { formatPKR, formatPercent } from "@/lib/format";
 import { todayString } from "@/lib/dates";
@@ -26,50 +27,55 @@ export default async function RoomDetailPage({
   const { id } = await params;
   const canManage = can(user.role, PERMISSIONS.manageStructure);
 
-  const room = await prisma.room.findUnique({
-    where: { id },
-    include: {
-      floor: true,
-      seats: {
-        orderBy: { order: "asc" },
-        include: {
-          currentResident: {
-            include: {
-              rentCharges: { select: { amount: true } },
-              messCharges: { select: { amount: true } },
-              payments: { select: { amount: true, paymentType: true } },
-              securityTransactions: { select: { amount: true, type: true } },
+  const [room, floors] = await Promise.all([
+    prisma.room.findUnique({
+      where: { id },
+      include: {
+        floor: true,
+        seats: {
+          orderBy: { order: "asc" },
+          include: {
+            currentResident: {
+              select: { name: true, monthlyRent: true },
             },
+            assignments: { where: { endDate: null }, select: { startDate: true } },
           },
-          assignments: { where: { endDate: null }, select: { startDate: true } },
         },
       },
-    },
-  });
+    }),
+    prisma.floor.findMany({
+      orderBy: { order: "asc" },
+      select: { id: true, name: true },
+    }),
+  ]);
   if (!room) notFound();
 
-  const floors = await prisma.floor.findMany({
-    orderBy: { order: "asc" },
-    select: { id: true, name: true },
-  });
+  const financials = await getBulkResidentFinancials(
+    room.seats
+      .map((s) => s.currentResidentId)
+      .filter((id): id is string => !!id),
+  );
 
   const occupied = room.seats.filter((s) => s.currentResidentId).length;
   const total = room.seats.length;
 
-  const seatCards: SeatCardData[] = room.seats.map((s) => ({
-    id: s.id,
-    name: s.name,
-    active: s.active,
-    residentId: s.currentResidentId,
-    residentName: s.currentResident?.name ?? null,
-    monthlyRent: s.currentResident?.monthlyRent ?? null,
-    financial: s.currentResident
-      ? getResidentSeatFinancials(s.currentResident)
-      : null,
-    assignmentStartDate: s.assignments[0]?.startDate
-      ? formatDisplayDate(toDateString(s.assignments[0].startDate))
-      : null,
-  }));
+  const seatCards: SeatCardData[] = room.seats.map((s) => {
+    const fin = s.currentResidentId ? financials.get(s.currentResidentId) : undefined;
+    return {
+      id: s.id,
+      name: s.name,
+      active: s.active,
+      residentId: s.currentResidentId,
+      residentName: s.currentResident?.name ?? null,
+      monthlyRent: s.currentResident?.monthlyRent ?? null,
+      financial: fin
+        ? { paid: fin.paid, due: fin.due, securityHeld: fin.securityHeld }
+        : null,
+      assignmentStartDate: s.assignments[0]?.startDate
+        ? formatDisplayDate(toDateString(s.assignments[0].startDate))
+        : null,
+    };
+  });
 
   return (
     <div>
@@ -156,29 +162,3 @@ export default async function RoomDetailPage({
   );
 }
 
-function getResidentSeatFinancials(resident: {
-  rentCharges: { amount: number }[];
-  messCharges: { amount: number }[];
-  payments: { amount: number; paymentType: string }[];
-  securityTransactions: { amount: number; type: string }[];
-}) {
-  const rentCharged = resident.rentCharges.reduce((sum, charge) => sum + charge.amount, 0);
-  const messCharged = resident.messCharges.reduce((sum, charge) => sum + charge.amount, 0);
-  const rentPaid = resident.payments
-    .filter((payment) => payment.paymentType === "RENT")
-    .reduce((sum, payment) => sum + payment.amount, 0);
-  const messPaid = resident.payments
-    .filter((payment) => payment.paymentType === "MESS")
-    .reduce((sum, payment) => sum + payment.amount, 0);
-  const securityHeld = resident.securityTransactions.reduce(
-    (sum, transaction) =>
-      sum + (transaction.type === "DEPOSIT" ? transaction.amount : -transaction.amount),
-    0,
-  );
-
-  return {
-    paid: rentPaid + messPaid,
-    due: Math.max(0, rentCharged - rentPaid) + Math.max(0, messCharged - messPaid),
-    securityHeld,
-  };
-}

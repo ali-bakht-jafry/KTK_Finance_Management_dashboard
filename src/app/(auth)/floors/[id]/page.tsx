@@ -4,6 +4,7 @@ import { ArrowLeft, DoorOpen, Plus } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { can, PERMISSIONS } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
+import { getBulkResidentFinancials } from "@/lib/aggregates";
 import { formatPKR, formatPercent } from "@/lib/format";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
@@ -37,14 +38,6 @@ export default async function FloorDetailPage({
             select: {
               id: true,
               currentResidentId: true,
-              currentResident: {
-                include: {
-                  rentCharges: { select: { amount: true } },
-                  messCharges: { select: { amount: true } },
-                  payments: { select: { amount: true, paymentType: true } },
-                  securityTransactions: { select: { amount: true, type: true } },
-                },
-              },
             },
           },
         },
@@ -53,26 +46,34 @@ export default async function FloorDetailPage({
   });
   if (!floor) notFound();
 
+  const financials = await getBulkResidentFinancials(
+    floor.rooms.flatMap((r) =>
+      r.seats.map((s) => s.currentResidentId).filter((id): id is string => !!id),
+    ),
+  );
+
   const rooms = floor.rooms.map((r) => {
     const occupied = r.seats.filter((s) => s.currentResidentId).length;
+    let paid = 0;
+    let due = 0;
+    let securityHeld = 0;
+    for (const seat of r.seats) {
+      if (!seat.currentResidentId) continue;
+      const fin = financials.get(seat.currentResidentId);
+      if (!fin) continue;
+      paid += fin.paid;
+      due += fin.due;
+      securityHeld += fin.securityHeld;
+    }
     return {
       ...r,
       total: r.seats.length,
       occupied,
       vacant: r.seats.length - occupied,
       pct: r.seats.length ? occupied / r.seats.length : 0,
-      paid: r.seats.reduce(
-        (sum, seat) => sum + (seat.currentResident ? getResidentPaid(seat.currentResident) : 0),
-        0,
-      ),
-      due: r.seats.reduce(
-        (sum, seat) => sum + (seat.currentResident ? getResidentDue(seat.currentResident) : 0),
-        0,
-      ),
-      securityHeld: r.seats.reduce(
-        (sum, seat) => sum + (seat.currentResident ? getSecurityHeld(seat.currentResident) : 0),
-        0,
-      ),
+      paid,
+      due,
+      securityHeld,
     };
   });
 
@@ -166,35 +167,3 @@ export default async function FloorDetailPage({
   );
 }
 
-type ResidentFinancialData = {
-  rentCharges: { amount: number }[];
-  messCharges: { amount: number }[];
-  payments: { amount: number; paymentType: string }[];
-  securityTransactions: { amount: number; type: string }[];
-};
-
-function getResidentPaid(resident: ResidentFinancialData) {
-  return resident.payments
-    .filter((payment) => payment.paymentType === "RENT" || payment.paymentType === "MESS")
-    .reduce((sum, payment) => sum + payment.amount, 0);
-}
-
-function getResidentDue(resident: ResidentFinancialData) {
-  const rentCharged = resident.rentCharges.reduce((sum, charge) => sum + charge.amount, 0);
-  const messCharged = resident.messCharges.reduce((sum, charge) => sum + charge.amount, 0);
-  const rentPaid = resident.payments
-    .filter((payment) => payment.paymentType === "RENT")
-    .reduce((sum, payment) => sum + payment.amount, 0);
-  const messPaid = resident.payments
-    .filter((payment) => payment.paymentType === "MESS")
-    .reduce((sum, payment) => sum + payment.amount, 0);
-  return Math.max(0, rentCharged - rentPaid) + Math.max(0, messCharged - messPaid);
-}
-
-function getSecurityHeld(resident: ResidentFinancialData) {
-  return resident.securityTransactions.reduce(
-    (sum, transaction) =>
-      sum + (transaction.type === "DEPOSIT" ? transaction.amount : -transaction.amount),
-    0,
-  );
-}

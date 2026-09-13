@@ -136,6 +136,95 @@ export type ResidentBalances = {
   totalDue: number;
 };
 
+export type ResidentFinancials = {
+  rentCharged: number;
+  rentPaid: number;
+  messCharged: number;
+  messPaid: number;
+  paid: number;
+  due: number;
+  securityHeld: number;
+};
+
+/**
+ * Compute paid/due/security for many residents in a handful of grouped
+ * aggregate queries instead of loading every resident's full charge/payment
+ * history. Used by the room & floor seat grids, where we only need three
+ * summary numbers per resident.
+ */
+export async function getBulkResidentFinancials(
+  residentIds: string[],
+): Promise<Map<string, ResidentFinancials>> {
+  const result = new Map<string, ResidentFinancials>();
+  const ids = residentIds.filter((id) => id);
+  if (ids.length === 0) return result;
+
+  const [rent, mess, payments, security] = await Promise.all([
+    prisma.rentCharge.groupBy({
+      by: ["residentId"],
+      where: { residentId: { in: ids } },
+      _sum: { amount: true },
+    }),
+    prisma.messCharge.groupBy({
+      by: ["residentId"],
+      where: { residentId: { in: ids } },
+      _sum: { amount: true },
+    }),
+    prisma.payment.groupBy({
+      by: ["residentId", "paymentType"],
+      where: { residentId: { in: ids }, paymentType: { in: ["RENT", "MESS"] } },
+      _sum: { amount: true },
+    }),
+    prisma.securityTransaction.groupBy({
+      by: ["residentId", "type"],
+      where: { residentId: { in: ids } },
+      _sum: { amount: true },
+    }),
+  ]);
+
+  const rentCharged = new Map<string, number>();
+  for (const row of rent) rentCharged.set(row.residentId, row._sum.amount ?? 0);
+  const messCharged = new Map<string, number>();
+  for (const row of mess) messCharged.set(row.residentId, row._sum.amount ?? 0);
+
+  const rentPaid = new Map<string, number>();
+  const messPaid = new Map<string, number>();
+  for (const row of payments) {
+    if (!row.residentId) continue;
+    const amount = row._sum.amount ?? 0;
+    if (row.paymentType === "RENT") rentPaid.set(row.residentId, amount);
+    else if (row.paymentType === "MESS") messPaid.set(row.residentId, amount);
+  }
+
+  const securityHeld = new Map<string, number>();
+  for (const row of security) {
+    const amount = row._sum.amount ?? 0;
+    const held = securityHeld.get(row.residentId) ?? 0;
+    securityHeld.set(
+      row.residentId,
+      held + (row.type === "DEPOSIT" ? amount : -amount),
+    );
+  }
+
+  for (const id of ids) {
+    const rc = rentCharged.get(id) ?? 0;
+    const mc = messCharged.get(id) ?? 0;
+    const rp = rentPaid.get(id) ?? 0;
+    const mp = messPaid.get(id) ?? 0;
+    result.set(id, {
+      rentCharged: rc,
+      rentPaid: rp,
+      messCharged: mc,
+      messPaid: mp,
+      paid: rp + mp,
+      due: Math.max(0, rc - rp) + Math.max(0, mc - mp),
+      securityHeld: securityHeld.get(id) ?? 0,
+    });
+  }
+
+  return result;
+}
+
 export async function getResidentBalances(residentId: string): Promise<ResidentBalances> {
   const [rentCharges, rentPaid, messCharges, messPaid, sec] = await Promise.all([
     prisma.rentCharge.aggregate({ where: { residentId }, _sum: { amount: true } }),

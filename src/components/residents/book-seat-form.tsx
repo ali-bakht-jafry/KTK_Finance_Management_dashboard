@@ -28,11 +28,11 @@ export function BookSeatForm({ seatId, seatName, today, defaultRent }: BookSeatF
   const [securityDeposit, setSecurityDeposit] = useState("");
   const [initialPayment, setInitialPayment] = useState("");
   const [notes, setNotes] = useState("");
+  const [showOptional, setShowOptional] = useState(false);
 
   const { pending, run } = useAction(checkInResident, (res) => {
     toast.success("Seat booked and resident added.");
     router.push(`/residents/${res.id}`);
-    router.refresh();
   });
 
   return (
@@ -55,11 +55,12 @@ export function BookSeatForm({ seatId, seatName, today, defaultRent }: BookSeatF
       <Card>
         <CardContent className="space-y-4 p-1">
           <div className="rounded-md bg-muted/40 px-3 py-2 text-sm">
-            Booking seat <span className="font-semibold">{seatName}</span>
+            Booking bed <span className="font-semibold">{seatName}</span>
           </div>
+          <p className="text-sm font-medium">Resident details</p>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="book-name">Girl's full name</Label>
+              <Label htmlFor="book-name">Full name</Label>
               <Input id="book-name" value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
             </div>
             <div className="space-y-2">
@@ -77,26 +78,33 @@ export function BookSeatForm({ seatId, seatName, today, defaultRent }: BookSeatF
               <Input id="book-rent" type="number" value={monthlyRent} onChange={(e) => setMonthlyRent(e.target.value)} />
             </div>
           </div>
-          <div className="grid gap-4 sm:grid-cols-3">
-            <div className="space-y-2">
-              <Label htmlFor="book-mess">Monthly mess (Rs.)</Label>
-              <Input id="book-mess" type="number" value={monthlyMess} onChange={(e) => setMonthlyMess(e.target.value)} />
+          <Button type="button" variant="ghost" className="w-full justify-start px-0" onClick={() => setShowOptional((value) => !value)}>
+            {showOptional ? "Hide extra details" : "Add security, first payment, or notes"}
+          </Button>
+          {showOptional && (
+            <div className="space-y-4 rounded-md border p-3">
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div className="space-y-2">
+                  <Label htmlFor="book-mess">Monthly mess (Rs.)</Label>
+                  <Input id="book-mess" type="number" value={monthlyMess} onChange={(e) => setMonthlyMess(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="book-security">Security received (Rs.)</Label>
+                  <Input id="book-security" type="number" value={securityDeposit} onChange={(e) => setSecurityDeposit(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="book-payment">Rent received now (Rs.)</Label>
+                  <Input id="book-payment" type="number" value={initialPayment} onChange={(e) => setInitialPayment(e.target.value)} />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="book-notes">Notes</Label>
+                <Textarea id="book-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
+              </div>
             </div>
-            <div className="space-y-2">
-                <Label htmlFor="book-security">Security received (Rs.)</Label>
-              <Input id="book-security" type="number" value={securityDeposit} onChange={(e) => setSecurityDeposit(e.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="book-payment">Rent received now (Rs.)</Label>
-              <Input id="book-payment" type="number" value={initialPayment} onChange={(e) => setInitialPayment(e.target.value)} />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="book-notes">Notes</Label>
-            <Textarea id="book-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
-          </div>
+          )}
           <Button type="submit" disabled={pending} className="w-full">
-            {pending ? "Saving…" : "Book seat"}
+            {pending ? "Saving booking..." : "Book bed"}
           </Button>
         </CardContent>
       </Card>

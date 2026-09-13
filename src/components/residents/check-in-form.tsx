@@ -52,7 +52,6 @@ export function CheckInForm({
   const { pending, run } = useAction(checkInResident, (res) => {
     toast.success("Resident checked in.");
     router.push(`/residents/${res.id}`);
-    router.refresh();
   });
 
   const submit = (e: React.FormEvent) => {

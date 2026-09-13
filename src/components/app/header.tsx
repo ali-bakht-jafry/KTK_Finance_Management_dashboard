@@ -45,7 +45,7 @@ export function AppHeader({
   const submitSearch = (e: React.FormEvent) => {
     e.preventDefault();
     const q = query.trim();
-    router.push(q ? `/search?q=${encodeURIComponent(q)}` : "/search");
+    router.push(q ? `/residents?q=${encodeURIComponent(q)}` : "/residents");
     setQuery("");
   };
 
@@ -73,7 +73,7 @@ export function AppHeader({
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search…"
+          placeholder="Search residents…"
           className="h-9 pl-8 text-xs sm:text-sm"
         />
       </form>

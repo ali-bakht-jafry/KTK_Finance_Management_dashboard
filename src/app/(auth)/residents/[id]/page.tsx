@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Suspense } from "react";
 import { ArrowLeft, CreditCard, FileText, History, ShieldCheck } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { can, PERMISSIONS } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { getResidentBalances } from "@/lib/aggregates";
+import type { ResidentBalances } from "@/lib/aggregates";
 import { formatDisplayDate, periodLabel, todayString } from "@/lib/dates";
 import { formatPKR } from "@/lib/format";
 import {
@@ -25,6 +27,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Skeleton } from "@/components/ui/skeleton";
 import { ResidentActions } from "@/components/residents/resident-actions";
 
 const TABS = [
@@ -51,39 +54,37 @@ export default async function ResidentPage({
   const activeTab: TabKey = TABS.some((t) => t.key === tab) ? (tab as TabKey) : "overview";
 
   const canManage = can(user.role, PERMISSIONS.manageResidents);
-  const canFinance = can(user.role, PERMISSIONS.manageFinance);
 
-  const resident = await prisma.resident.findUnique({
-    where: { id },
-    include: {
-      currentSeat: { include: { room: { include: { floor: true } } } },
-      assignments: { orderBy: { startDate: "desc" } },
-      rentCharges: { orderBy: { period: "desc" }, include: { payments: true } },
-      messCharges: { orderBy: { period: "desc" }, include: { payments: true } },
-      payments: {
-        orderBy: { date: "desc" },
-        include: { rentCharge: true, messCharge: true, receipt: true },
+  // Core resident record + balances + transfer dropdown are all light queries
+  // that every tab needs. The tab-specific data (payments, charges, etc.) is
+  // loaded lazily inside <ResidentTab> so switching tabs never re-fetches the
+  // whole history.
+  const [resident, balances, floors] = await Promise.all([
+    prisma.resident.findUnique({
+      where: { id },
+      include: {
+        currentSeat: { include: { room: { include: { floor: true } } } },
       },
-      securityTransactions: { orderBy: { date: "desc" } },
-    },
-  });
-  if (!resident) notFound();
-
-  const balances = await getResidentBalances(resident.id);
-
-  const floors = canManage
-    ? await prisma.floor.findMany({
-        orderBy: { order: "asc" },
-        include: {
-          rooms: {
-            orderBy: { name: "asc" },
-            include: {
-              seats: { orderBy: { order: "asc" }, select: { id: true, name: true, currentResidentId: true, active: true } },
+    }),
+    getResidentBalances(id),
+    canManage
+      ? prisma.floor.findMany({
+          orderBy: { order: "asc" },
+          include: {
+            rooms: {
+              orderBy: { name: "asc" },
+              include: {
+                seats: {
+                  orderBy: { order: "asc" },
+                  select: { id: true, name: true, currentResidentId: true, active: true },
+                },
+              },
             },
           },
-        },
-      })
-    : [];
+        })
+      : Promise.resolve([]),
+  ]);
+  if (!resident) notFound();
 
   const floorOptions = floors.map((f) => ({
     id: f.id,
@@ -168,52 +169,128 @@ export default async function ResidentPage({
         ))}
       </div>
 
-      {activeTab === "overview" && (
-        <OverviewTab
+      <Suspense fallback={<TabSkeleton />}>
+        <ResidentTab
+          tab={activeTab}
+          resident={{
+            id: resident.id,
+            monthlyRent: resident.monthlyRent,
+            monthlyMess: resident.monthlyMess,
+            joiningDate: resident.joiningDate,
+            notes: resident.notes,
+          }}
           balances={balances}
-          rent={resident.monthlyRent}
-          mess={resident.monthlyMess}
-          joined={resident.joiningDate}
-          notes={resident.notes}
-          securityHeld={balances.securityHeld}
         />
-      )}
+      </Suspense>
+    </div>
+  );
+}
 
-      {activeTab === "rent" && (
-        <ChargesTable
-          rows={resident.rentCharges.map((c) => ({
-            period: periodLabel(c.period),
-            amount: c.amount,
-            paid: c.payments.reduce((s, p) => s + p.amount, 0),
-          }))}
-          empty="No rent charges yet. Generate monthly charges from the Rent module."
-          totalLabel="Rent charged"
-          total={balances.rentCharged}
-        />
-      )}
+/**
+ * Loads only the data for the currently active tab, so the resident record
+ * renders immediately and each tab switch fetches a small, targeted query.
+ */
+async function ResidentTab({
+  tab,
+  resident,
+  balances,
+}: {
+  tab: TabKey;
+  resident: {
+    id: string;
+    monthlyRent: number;
+    monthlyMess: number;
+    joiningDate: Date;
+    notes: string | null;
+  };
+  balances: ResidentBalances;
+}) {
+  if (tab === "overview") {
+    return (
+      <OverviewTab
+        balances={balances}
+        rent={resident.monthlyRent}
+        mess={resident.monthlyMess}
+        joined={resident.joiningDate}
+        notes={resident.notes}
+        securityHeld={balances.securityHeld}
+      />
+    );
+  }
 
-      {activeTab === "mess" && (
-        <ChargesTable
-          rows={resident.messCharges.map((c) => ({
-            period: periodLabel(c.period),
-            amount: c.amount,
-            paid: c.payments.reduce((s, p) => s + p.amount, 0),
-          }))}
-          empty="No mess charges yet."
-          totalLabel="Mess charged"
-          total={balances.messCharged}
-        />
-      )}
+  if (tab === "rent") {
+    const charges = await prisma.rentCharge.findMany({
+      where: { residentId: resident.id },
+      orderBy: { period: "desc" },
+      include: { payments: true },
+    });
+    return (
+      <ChargesTable
+        rows={charges.map((c) => ({
+          period: periodLabel(c.period),
+          amount: c.amount,
+          paid: c.payments.reduce((s, p) => s + p.amount, 0),
+        }))}
+        empty="No rent charges yet. Generate monthly charges from the Rent module."
+        totalLabel="Rent charged"
+        total={balances.rentCharged}
+      />
+    );
+  }
 
-      {activeTab === "payments" && (
-        <PaymentsTable payments={resident.payments} canFinance={canFinance} />
-      )}
+  if (tab === "mess") {
+    const charges = await prisma.messCharge.findMany({
+      where: { residentId: resident.id },
+      orderBy: { period: "desc" },
+      include: { payments: true },
+    });
+    return (
+      <ChargesTable
+        rows={charges.map((c) => ({
+          period: periodLabel(c.period),
+          amount: c.amount,
+          paid: c.payments.reduce((s, p) => s + p.amount, 0),
+        }))}
+        empty="No mess charges yet."
+        totalLabel="Mess charged"
+        total={balances.messCharged}
+      />
+    );
+  }
 
-      {activeTab === "security" && (
-        <SecurityTable transactions={resident.securityTransactions} held={balances.securityHeld} />
-      )}
+  if (tab === "payments") {
+    const payments = await prisma.payment.findMany({
+      where: { residentId: resident.id },
+      orderBy: { date: "desc" },
+      include: { rentCharge: true, messCharge: true, receipt: true },
+    });
+    return <PaymentsTable payments={payments} />;
+  }
 
-      {activeTab === "history" && <HistoryTable assignments={resident.assignments} />}
+  if (tab === "security") {
+    const transactions = await prisma.securityTransaction.findMany({
+      where: { residentId: resident.id },
+      orderBy: { date: "desc" },
+    });
+    return <SecurityTable transactions={transactions} held={balances.securityHeld} />;
+  }
+
+  const assignments = await prisma.seatAssignment.findMany({
+    where: { residentId: resident.id },
+    orderBy: { startDate: "desc" },
+  });
+  return <HistoryTable assignments={assignments} />;
+}
+
+function TabSkeleton() {
+  return (
+    <div className="grid gap-4" aria-busy="true" aria-label="Loading">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {Array.from({ length: 3 }, (_, index) => (
+          <Skeleton key={index} className="h-24 rounded-lg" />
+        ))}
+      </div>
+      <Skeleton className="h-56 rounded-lg" />
     </div>
   );
 }
@@ -344,7 +421,6 @@ function ChargesTable({
 
 function PaymentsTable({
   payments,
-  canFinance,
 }: {
   payments: Array<{
     id: string;
@@ -357,7 +433,6 @@ function PaymentsTable({
     messCharge: { period: string } | null;
     receipt: { receiptNumber: string } | null;
   }>;
-  canFinance: boolean;
 }) {
   if (payments.length === 0) {
     return (

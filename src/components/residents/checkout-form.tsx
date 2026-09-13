@@ -30,7 +30,6 @@ export function CheckoutForm({
   const { pending, run } = useAction(checkoutResident, () => {
     toast.success("Resident checked out.");
     router.push("/residents?status=LEFT");
-    router.refresh();
   });
 
   const submit = (e: React.FormEvent) => {

@@ -3,9 +3,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  AlertCircle,
+  Banknote,
   DoorOpen,
   LayoutDashboard,
   Users,
+  UtensilsCrossed,
   Wallet,
   type LucideIcon,
 } from "lucide-react";
@@ -33,8 +36,10 @@ const NAV: NavSection[] = [
   {
     title: "Finance",
     items: [
+      { label: "Rent", href: "/rent", icon: Banknote, permission: PERMISSIONS.manageFinance },
+      { label: "Mess", href: "/mess", icon: UtensilsCrossed, permission: PERMISSIONS.manageFinance },
       { label: "Payments", href: "/payments", icon: Wallet, permission: PERMISSIONS.manageFinance },
-      { label: "Money due", href: "/dues", icon: Wallet, permission: PERMISSIONS.viewDues },
+      { label: "Money due", href: "/dues", icon: AlertCircle, permission: PERMISSIONS.viewDues },
     ],
   },
 ];

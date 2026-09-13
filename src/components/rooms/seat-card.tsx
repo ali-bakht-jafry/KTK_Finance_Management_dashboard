@@ -82,85 +82,83 @@ export function SeatCard({
       </DialogTrigger>
 
       <DialogContent>
-        <DialogHeader>
-          <DialogTitle>
-            {seat.name}
-            <Badge
-              variant={occupied ? "success" : seat.active ? "outline" : "warning"}
-              className="ml-2 align-middle"
-            >
-              {occupied ? "Booked" : seat.active ? "Vacant" : "Off"}
-            </Badge>
-          </DialogTitle>
-        </DialogHeader>
+        {!occupied && seat.active && canManage ? (
+          <>
+            <DialogHeader>
+              <DialogTitle>Book bed {seat.name}</DialogTitle>
+            </DialogHeader>
+            <BookSeatForm
+              seatId={seat.id}
+              seatName={seat.name}
+              today={today}
+              defaultRent={defaultRent}
+            />
+          </>
+        ) : (
+          <>
+            <DialogHeader>
+              <DialogTitle>
+                {seat.name}
+                <Badge
+                  variant={occupied ? "success" : seat.active ? "outline" : "warning"}
+                  className="ml-2 align-middle"
+                >
+                  {occupied ? "Booked" : seat.active ? "Vacant" : "Off"}
+                </Badge>
+              </DialogTitle>
+            </DialogHeader>
 
-        <div className="space-y-3 text-sm">
-          <Row label="Status" value={occupied ? "Booked" : seat.active ? "Vacant" : "Off"} />
-          <Row label="Booked by" value={seat.residentName ?? "Nobody yet"} />
-          <Row label="Assignment date" value={seat.assignmentStartDate ?? "—"} />
-          <Row
-            label="Monthly rent"
-            value={seat.monthlyRent != null ? formatPKR(seat.monthlyRent) : "—"}
-          />
-          {seat.financial && (
-            <>
-              <Row label="Paid so far" value={formatPKR(seat.financial.paid)} />
-              <Row label="Amount due" value={formatPKR(seat.financial.due)} />
-              <Row label="Security held" value={formatPKR(seat.financial.securityHeld)} />
-            </>
-          )}
-        </div>
-
-        <Separator />
-
-        <DialogFooter className="sm:justify-start">
-          {occupied && seat.residentId && (
-            <Button asChild variant="outline" size="sm">
-              <Link href={`/residents/${seat.residentId}`}>
-                <ExternalLink className="h-4 w-4" /> View resident
-              </Link>
-            </Button>
-          )}
-          {canManage && (
-            <>
-              {!occupied && seat.active && (
-                <Dialog>
-                  <DialogTrigger asChild>
-                    <Button size="sm">Book this seat</Button>
-                  </DialogTrigger>
-                  <DialogContent className="sm:max-w-2xl">
-                    <DialogHeader>
-                      <DialogTitle>Book vacant seat {seat.name}</DialogTitle>
-                    </DialogHeader>
-                    <BookSeatForm
-                      seatId={seat.id}
-                      seatName={seat.name}
-                      today={today}
-                      defaultRent={defaultRent}
-                    />
-                  </DialogContent>
-                </Dialog>
-              )}
-              <SeatForm
-                roomId={roomId}
-                seat={{ id: seat.id, name: seat.name, active: seat.active, residentName: seat.residentName }}
-                trigger={
-                  <Button variant="outline" size="sm">
-                    <Pencil className="h-4 w-4" /> Edit seat
-                  </Button>
-                }
+            <div className="space-y-3 text-sm">
+              <Row label="Status" value={occupied ? "Booked" : seat.active ? "Vacant" : "Off"} />
+              <Row label="Booked by" value={seat.residentName ?? "Nobody yet"} />
+              <Row label="Assignment date" value={seat.assignmentStartDate ?? "—"} />
+              <Row
+                label="Monthly rent"
+                value={seat.monthlyRent != null ? formatPKR(seat.monthlyRent) : "—"}
               />
-              {!occupied && seat.active && (
-                <ConfirmButton
-                  action={deleteSeat}
-                  id={seat.id}
-                  title="Delete seat"
-                  description={`Delete seat "${seat.name}"? This cannot be undone.`}
-                />
+              {seat.financial && (
+                <>
+                  <Row label="Paid so far" value={formatPKR(seat.financial.paid)} />
+                  <Row label="Amount due" value={formatPKR(seat.financial.due)} />
+                  <Row label="Security held" value={formatPKR(seat.financial.securityHeld)} />
+                </>
               )}
-            </>
-          )}
-        </DialogFooter>
+            </div>
+
+            <Separator />
+
+            <DialogFooter className="sm:justify-start">
+              {occupied && seat.residentId && (
+                <Button asChild variant="outline" size="sm">
+                  <Link href={`/residents/${seat.residentId}`}>
+                    <ExternalLink className="h-4 w-4" /> View resident
+                  </Link>
+                </Button>
+              )}
+              {canManage && (
+                <>
+                  <SeatForm
+                    roomId={roomId}
+                    seat={{ id: seat.id, name: seat.name, active: seat.active, residentName: seat.residentName }}
+                    trigger={
+                      <Button variant="outline" size="sm">
+                        <Pencil className="h-4 w-4" /> Edit bed
+                      </Button>
+                    }
+                  />
+                  {!occupied && (
+                    <ConfirmButton
+                      action={deleteSeat}
+                      id={seat.id}
+                      title="Delete bed"
+                      description={`Delete bed "${seat.name}"? This cannot be undone.`}
+                    />
+                  )}
+                </>
+              )}
+            </DialogFooter>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );

@@ -1,12 +1,11 @@
 import Link from "next/link";
-import { Plus, Users, ArrowRight } from "lucide-react";
+import { Plus, Users, ArrowRight, Search } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { can, PERMISSIONS } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 
 export default async function ResidentsPage({
@@ -62,6 +61,25 @@ export default async function ResidentsPage({
           <Link href="/residents?status=LEFT">Left</Link>
         </Button>
       </div>
+
+      <form className="mb-6 flex gap-2" method="get">
+        {status && <input type="hidden" name="status" value={status} />}
+        <div className="relative min-w-0 flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            name="q"
+            defaultValue={q ?? ""}
+            placeholder="Search by name or phone"
+            className="h-10 w-full rounded-md border border-input bg-background pl-9 pr-3 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        </div>
+        <Button type="submit" variant="outline">Search</Button>
+        {q && (
+          <Button asChild type="button" variant="ghost">
+            <Link href={status ? `/residents?status=${status}` : "/residents"}>Clear</Link>
+          </Button>
+        )}
+      </form>
 
       {residents.length === 0 ? (
         <EmptyState
